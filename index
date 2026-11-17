@@ -1,1 +1,138 @@
-
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ワーム狩り 3Dアクション</title>
+<style>
+:root{--bg:#0e1119;--fg:#eef1f6;--pn:rgba(8,10,16,.78);--red:#e23a30;--gold:#f2c14e;--cyan:#52d6ff;--ok:#7be08a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1119;--fg:#eef1f6}}
+:root[data-theme="dark"]{--bg:#0e1119;--fg:#eef1f6}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif;overflow:hidden;user-select:none}
+#c{position:fixed;inset:0}
+#fx{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;background:radial-gradient(ellipse at center,rgba(255,150,40,0) 40%,rgba(255,120,20,.45) 100%);mix-blend-mode:screen}
+#fx.on{opacity:1}
+#hud{position:fixed;left:12px;top:calc(10px + env(safe-area-inset-top,0px));width:min(300px,50vw);font-size:12px}
+.row{margin-bottom:7px}.row b{font-weight:600;display:block;margin-bottom:2px}
+.bar{height:9px;background:var(--pn);border:1px solid #556;border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%}
+#hp{background:var(--ok)}#cu{background:#ff9a2e}#kg{background:var(--cyan)}
+#top{position:fixed;right:12px;top:calc(10px + env(safe-area-inset-top,0px));text-align:right;font-size:14px;line-height:1.6}
+#form{font-size:18px;font-weight:700}
+#msg{position:fixed;left:0;right:0;top:30%;text-align:center;font-size:clamp(28px,7vw,64px);font-weight:800;letter-spacing:.06em;color:var(--gold);text-shadow:0 0 18px #000,0 3px 0 #800;opacity:0;pointer-events:none;transition:opacity .2s}
+#msg.on{opacity:1}
+#help{position:fixed;left:12px;bottom:calc(8px + env(safe-area-inset-bottom,0px));font-size:11px;opacity:.75;background:var(--pn);padding:4px 8px;border-radius:3px}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,6,10,.78);cursor:pointer}
+#ov div{max-width:min(520px,90vw);line-height:1.8}
+#ov h1{font-size:clamp(26px,6vw,44px);margin:0 0 10px;color:var(--gold)}
+#ov small{opacity:.8}
+</style></head><body>
+<div id="c"></div><div id="fx"></div>
+<div id="hud">
+<div class="row"><b>HP</b><div class="bar"><i id="hp"></i></div></div>
+<div class="row"><b>クロックアップ</b><div class="bar"><i id="cu"></i></div></div>
+<div class="row"><b>ライダーキック(Rで発動)</b><div class="bar"><i id="kg" style="width:0"></i></div></div>
+</div>
+<div id="top"><div id="form"></div><div id="wv"></div><div id="sc"></div></div>
+<div id="msg"></div>
+<div id="help">WASD移動 / クリック・J・Space攻撃 / E キャストオフ / F クロックアップ / R ライダーキック / ←→・右ドラッグ カメラ</div>
+<div id="ov"><div id="ovt"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const T=THREE,$=id=>document.getElementById(id),PI=Math.PI,rnd=Math.random;
+const R=new T.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);$('c').appendChild(R.domElement);
+const S=new T.Scene();S.background=new T.Color(0x0e1119);S.fog=new T.Fog(0x0e1119,25,90);
+const cam=new T.PerspectiveCamera(60,innerWidth/innerHeight,.1,200);
+S.add(new T.HemisphereLight(0xaac0ff,0x202030,.95));
+const sun=new T.DirectionalLight(0xffffff,.8);sun.position.set(20,40,10);S.add(sun);
+const gr=new T.Mesh(new T.PlaneGeometry(200,200),new T.MeshLambertMaterial({color:0x1b1f2b}));gr.rotation.x=-PI/2;S.add(gr);
+S.add(new T.GridHelper(92,46,0x3a4256,0x232838));
+for(let i=0;i<36;i++){const a=i/36*2*PI,r=54+rnd()*25,h=8+rnd()*30,b=new T.Mesh(new T.BoxGeometry(6+rnd()*6,h,6+rnd()*6),new T.MeshLambertMaterial({color:0x242a3a}));b.position.set(Math.cos(a)*r,h/2,Math.sin(a)*r);S.add(b)}
+addEventListener('resize',()=>{R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+let AC;function beep(f=440,d=.12,ty='square'){try{AC=AC||new AudioContext();const o=AC.createOscillator(),g=AC.createGain();o.type=ty;o.frequency.value=f;g.gain.value=.05;g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+d)}catch(e){}}
+let mt;function msg(t,ms=1100){const m=$('msg');m.textContent=t;m.classList.add('on');clearTimeout(mt);mt=setTimeout(()=>m.classList.remove('on'),ms)}
+// ---- effects
+const FX=[],bg=new T.BoxGeometry(.18,.18,.18);
+function fx(p,col,n,sp,life,grav=9){for(let i=0;i<n;i++){const m=new T.Mesh(bg,new T.MeshBasicMaterial({color:col,transparent:true}));m.position.copy(p);m.position.y+=1;S.add(m);FX.push({m,v:new T.Vector3(rnd()-.5,rnd()*.9,rnd()-.5).multiplyScalar(sp),l:life,L:life,g:grav,s:0})}}
+function stepFX(dt){for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.l-=dt;f.m.position.addScaledVector(f.v,dt);f.v.y-=f.g*dt;f.m.rotation.x+=f.s*dt;f.m.material.opacity=Math.max(0,f.l/f.L);if(f.l<=0){S.remove(f.m);FX.splice(i,1)}}}
+// ---- player
+const P={g:new T.Group(),hp:100,rider:false,cu:false,cug:100,kg:0,atk:0,inv:0,kick:null,yaw:0,ry:0,armor:[],horn:null};
+(function(){const M=(c,e=0)=>new T.MeshLambertMaterial({color:c,emissive:e}),red=M(0xc01818),sil=M(0xcfd4dc,0x222222),add=(g,m,x,y,z)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);P.g.add(o);return o};
+add(new T.BoxGeometry(.9,1.1,.5),red,0,1.45,0);
+for(const s of[-1,1]){add(new T.BoxGeometry(.32,1,.36),sil,s*.25,.5,0);add(new T.BoxGeometry(.26,.9,.28),red,s*.62,1.4,0);add(new T.BoxGeometry(.1,.1,.06),M(0x52d6ff,0x52d6ff),s*.14,2.28,.3)}
+add(new T.SphereGeometry(.34,12,10),red,0,2.25,0);add(new T.BoxGeometry(.36,.2,.1),M(0xf2c14e,0x553300),0,1.1,.28);
+P.horn=add(new T.ConeGeometry(.08,.75,8),M(0xf2c14e,0x553300),0,2.7,.1);S.add(P.g)})();
+function hornSet(){P.horn.rotation.x=P.rider?0:-1.3;P.horn.position.set(0,P.rider?2.75:2.62,P.rider?.05:-.15)}
+function addArmor(){const defs=[[.5,.45,.6,-.7,1.95],[.5,.45,.6,.7,1.95],[1.15,.9,.7,0,1.5],[.7,.4,.7,0,2.5]];for(const d of defs){const m=new T.Mesh(new T.BoxGeometry(d[0],d[1],d[2]),new T.MeshLambertMaterial({color:0x8d939e,emissive:0x111111,transparent:true}));m.position.set(d[3],d[4],0);P.g.add(m);P.armor.push(m)}}
+// ---- worms
+let W=[],wave=0,score=0,state='title',shake=0,time=0;
+function mkWorm(){const g=new T.Group(),m=new T.MeshLambertMaterial({color:0x8a7a62}),a=(geo,x,y,z,mm=m)=>{const o=new T.Mesh(geo,mm);o.position.set(x,y,z);g.add(o);return o};
+const b=a(new T.SphereGeometry(.7,12,10),0,.8,0);b.scale.set(1,.9,1.3);a(new T.SphereGeometry(.4,10,8),0,1.1,.9);
+const em=new T.MeshBasicMaterial({color:0xff3030});a(new T.SphereGeometry(.1,6,6),-.18,1.2,1.22,em);a(new T.SphereGeometry(.1,6,6),.18,1.2,1.22,em);
+const t=a(new T.ConeGeometry(.35,1.1,8),0,.7,-1.1);t.rotation.x=-PI/2;return{g,m}}
+function spawn(boss){const{g,m}=mkWorm(),a=rnd()*2*PI,r=24+rnd()*10;g.position.set(Math.cos(a)*r,0,Math.sin(a)*r);S.add(g);
+const w={g,m,hp:30,max:30,sp:2.6,dmg:8,adult:false,boss,cd:1,kv:new T.Vector3(),dash:0,dt:3+rnd()*3,fl:0,ph:rnd()*9};if(boss)molt(w,true);W.push(w)}
+function molt(w,boss){w.adult=true;w.hp=w.max=boss?380:55;w.sp=boss?3.2:4;w.dmg=boss?22:14;w.m.color.setHex(boss?0x7a1e4e:0x5b3a9e);w.g.scale.setScalar(boss?2.2:1.3);if(!boss){fx(w.g.position,0xb89bff,22,6,.7);beep(300,.2,'sawtooth')}}
+function hurt(w,d,dir,kb){w.hp-=d;w.fl=.1;w.kv.addScaledVector(dir,kb*(w.boss?.4:1));P.kg=Math.min(100,P.kg+d*.45);fx(w.g.position,0xffd070,5,4,.4);
+if(w.hp<=0){if(!w.adult)molt(w);else{S.remove(w.g);W.splice(W.indexOf(w),1);fx(w.g.position,0xff7a30,30,7,.9);score+=w.boss?2000:w.max>40?300:100;beep(120,.25,'sawtooth')}}}
+// ---- actions
+const fwd=()=>new T.Vector3(Math.sin(P.ry),0,Math.cos(P.ry));
+function nearest(){let b=null,bd=1e9;for(const w of W){const d=w.g.position.distanceTo(P.g.position);if(d<bd){bd=d;b=w}}return[b,bd]}
+function attack(){if(P.atk>0||P.kick)return;P.atk=P.cu?.12:P.rider?.22:.5;const[n,nd]=nearest();if(n&&nd<5){const d=n.g.position.clone().sub(P.g.position);P.ry=Math.atan2(d.x,d.z)}
+const fw=fwd(),dmg=(P.rider?9:16)*(P.cu?2.2:1);
+const s=new T.Mesh(new T.BoxGeometry(2.6,.15,1.8),new T.MeshBasicMaterial({color:0xffe08a,transparent:true}));s.position.copy(P.g.position).addScaledVector(fw,1.6);s.position.y=1.4;s.rotation.y=P.ry;S.add(s);FX.push({m:s,v:new T.Vector3(),l:.12,L:.12,g:0,s:0});
+for(const w of[...W]){const d=w.g.position.clone().sub(P.g.position);d.y=0;const L=d.length();d.normalize();if(L<1.5||(L<3.2&&d.dot(fw)>.2))hurt(w,dmg,d,P.rider?3:7)}beep(P.rider?700:300,.05)}
+function castOff(){if(P.kick)return;if(P.rider){msg('キャストオフ済み',700);return}P.rider=true;hornSet();
+for(const a of P.armor){S.attach(a);const v=a.position.clone().sub(P.g.position).setY(0).normalize().multiplyScalar(9);v.y=6;FX.push({m:a,v,l:1.4,L:1.4,g:18,s:7})}P.armor=[];
+for(const w of[...W]){const d=w.g.position.clone().sub(P.g.position);d.y=0;if(d.length()<9)hurt(w,28,d.normalize(),12)}fx(P.g.position,0xffa040,40,10,.6);shake=.5;msg('CAST OFF');beep(220,.3,'sawtooth');setTimeout(()=>beep(880,.15),120)}
+function startCU(){if(P.cu)return;if(!P.rider){msg('先にキャストオフ',800);return}if(P.cug<25)return;P.cu=true;$('fx').classList.add('on');msg('CLOCK UP');beep(1200,.25,'sine')}
+function endCU(){if(!P.cu)return;P.cu=false;$('fx').classList.remove('on');msg('CLOCK OVER',700);beep(500,.2,'sine')}
+function kick(){if(!P.rider||P.kick)return;if(P.kg<100){msg('ゲージが足りない',700);return}const[t]=nearest();if(!t)return;
+const to=t.g.position.clone().sub(P.g.position).setY(0),L=to.length();to.normalize();P.kick={t:0,a:P.g.position.clone(),b:t.g.position.clone().addScaledVector(to,-1.2).setY(0),dur:.25+L*.012};P.kg=0;P.ry=Math.atan2(to.x,to.z);msg('RIDER KICK',900);beep(180,.35,'sawtooth')}
+// ---- flow
+function startWave(){wave++;P.rider=false;endCU();$('fx').classList.remove('on');addArmor();hornSet();P.hp=Math.min(100,P.hp+25);const n=[0,5,7,9,11,6][wave];for(let i=0;i<n;i++)spawn(false);if(wave==5)spawn(true);msg(wave==5?'FINAL WAVE':'WAVE '+wave,1600)}
+function reset(){for(const w of W)S.remove(w.g);W=[];for(const f of FX)S.remove(f.m);FX.length=0;for(const a of P.armor)P.g.remove(a);P.armor=[];Object.assign(P,{hp:100,rider:false,cu:false,cug:100,kg:0,atk:0,inv:0,kick:null,yaw:0,ry:0});P.g.position.set(0,0,0);wave=0;score=0;state='play';$('ov').style.display='none';startWave()}
+function over(win){state=win?'win':'over';$('ov').style.display='flex';$('ovt').innerHTML=win?'<h1>ミッション完了</h1>すべてのワームを倒した。<br>スコア '+score+'<br><small>Enter でもう一度</small>':'<h1>ゲームオーバー</h1>スコア '+score+'<br><small>Enter でリトライ</small>'}
+$('ovt').innerHTML='<h1>ワーム狩り</h1>街に潜むワームを全5ウェーブで倒せ。<br>マスクドフォームは鈍重だが硬い。<b>E</b> でキャストオフすると俊敏になり、<b>F</b> のクロックアップで敵が止まって見える。<br>攻撃でライダーキックのゲージが溜まる。<br><small>Enter かクリックで開始 / 個人用ファンメイド作品</small>';
+// ---- input
+const K={};let ml=false,drag=false;
+addEventListener('keydown',e=>{K[e.code]=true;if(e.code.startsWith('Arrow')||e.code=='Space')e.preventDefault();if(e.repeat)return;
+if(e.code=='Enter'&&state!='play')reset();if(state!='play')return;if(e.code=='KeyE')castOff();if(e.code=='KeyF')P.cu?endCU():startCU();if(e.code=='KeyR')kick()});
+addEventListener('keyup',e=>K[e.code]=false);
+addEventListener('mousedown',e=>{if(e.button==0)ml=true;if(e.button==2)drag=true});addEventListener('mouseup',()=>{ml=drag=false});
+addEventListener('mousemove',e=>{if(drag)P.yaw-=e.movementX*.005});addEventListener('contextmenu',e=>e.preventDefault());
+$('ov').addEventListener('click',()=>{if(state!='play')reset()});
+const ang=x=>((x%(2*PI))+3*PI)%(2*PI)-PI;
+// ---- update
+function update(dt){time+=dt;const ts=P.cu?.1:1,edt=dt*ts;
+if(K.ArrowLeft)P.yaw+=2*dt;if(K.ArrowRight)P.yaw-=2*dt;
+if(P.cu){P.cug-=20*dt;if(P.cug<=0){P.cug=0;endCU()}}else P.cug=Math.min(100,P.cug+6*dt);
+P.atk-=dt;P.inv-=dt;
+if(P.kick){const k=P.kick;k.t+=dt;const u=Math.min(1,k.t/k.dur);P.g.position.lerpVectors(k.a,k.b,u);P.g.position.y=Math.sin(u*PI)*1.2;fx(P.g.position,0x52d6ff,2,1,.35,0);
+if(u>=1){P.g.position.y=0;for(const w of[...W]){const d=w.g.position.clone().sub(k.b);d.y=0;if(d.length()<6)hurt(w,95,d.normalize(),14)}fx(k.b,0xffffff,50,12,.8);fx(k.b,0x52d6ff,30,8,.8);shake=1;beep(90,.5,'sawtooth');P.kick=null}}
+else{const fx_=-Math.sin(P.yaw),fz_=-Math.cos(P.yaw),ix=(K.KeyD?1:0)-(K.KeyA?1:0),iz=(K.KeyW?1:0)-(K.KeyS?1:0);let mx=ix*-fz_+iz*fx_,mz=ix*fx_+iz*fz_;const L=Math.hypot(mx,mz);
+if(L>0){mx/=L;mz/=L;const sp=P.rider?9:5;P.g.position.x+=mx*sp*dt;P.g.position.z+=mz*sp*dt;P.ry+=ang(Math.atan2(mx,mz)-P.ry)*Math.min(1,dt*14)}
+if(K.Space||K.KeyJ||ml)attack();
+if(P.cu)fx(P.g.position,0xff9a2e,1,.6,.5,0)}
+const q=Math.hypot(P.g.position.x,P.g.position.z);if(q>46)P.g.position.multiplyScalar(46/q);
+P.g.rotation.y=P.ry;
+for(const w of W){const d=P.g.position.clone().sub(w.g.position);d.y=0;const L=d.length();d.normalize();
+w.dt-=edt;if(w.adult&&w.dash<=0&&w.dt<=0){w.dash=1.2;w.dt=4+rnd()*3}if(w.dash>0)w.dash-=edt;
+const sp=w.sp*(w.dash>0?2.6:1);if(L>1.7)w.g.position.addScaledVector(d,sp*edt);
+w.g.position.addScaledVector(w.kv,edt);w.kv.multiplyScalar(Math.max(0,1-6*edt));
+for(const o of W)if(o!==w){const s=w.g.position.clone().sub(o.g.position);s.y=0;const l=s.length();if(l<1.6&&l>.01)w.g.position.addScaledVector(s.normalize(),(1.6-l)*.5)}
+const wq=Math.hypot(w.g.position.x,w.g.position.z);if(wq>46)w.g.position.multiplyScalar(46/wq);
+w.g.position.y=Math.abs(Math.sin(time*(w.dash>0?14:6)*(ts<1?.3:1)+w.ph))*.15;w.g.rotation.y=Math.atan2(d.x,d.z);
+w.cd-=edt;w.fl-=dt;w.m.emissive.setHex(w.fl>0?0xffffff:w.dash>0?0xff5a00:0);
+if(L<(w.boss?3.6:2)&&w.cd<=0&&!P.kick&&P.inv<=0){P.hp-=w.dmg*(P.rider?1:.4);P.inv=.5;w.cd=1.1;shake=.3;beep(100,.12,'sawtooth')}}
+stepFX(dt);
+if(P.hp<=0)over(false);
+else if(!W.length){if(wave>=5)over(true);else{wave<5&&startWave()}}
+shake=Math.max(0,shake-dt*2);
+const cx=P.g.position.x+Math.sin(P.yaw)*8.5,cz=P.g.position.z+Math.cos(P.yaw)*8.5;
+cam.position.set(cx+(rnd()-.5)*shake,5+(rnd()-.5)*shake,cz+(rnd()-.5)*shake);cam.lookAt(P.g.position.x,1.6,P.g.position.z)}
+function hud(){$('hp').style.width=Math.max(0,P.hp)+'%';$('cu').style.width=P.cug+'%';$('kg').style.width=P.kg+'%';$('kg').style.background=P.kg>=100?'#fff':'';
+$('form').textContent=P.cu?'クロックアップ中':P.rider?'ライダーフォーム':'マスクドフォーム';$('form').style.color=P.cu?'#ff9a2e':P.rider?'var(--cyan)':'var(--gold)';
+$('wv').textContent='WAVE '+wave+' / 5  残り '+W.length;$('sc').textContent='SCORE '+score}
+let last=performance.now();
+function loop(t){requestAnimationFrame(loop);const dt=Math.min(.05,(t-last)/1000);last=t;if(state=='play')update(dt);hud();R.render(S,cam)}
+hornSet();cam.position.set(0,5,8.5);cam.lookAt(0,1.6,0);requestAnimationFrame(loop);
+</script></body></html>
